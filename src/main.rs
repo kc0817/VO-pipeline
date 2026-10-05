@@ -20,11 +20,14 @@ fn main() {
     let args: Vec<String> = env::args().collect();
 
     const n: u32 = 15; // neighborhood size
-    let draw_freq = 10;
 
     let mut img_num = 243;
+    let mut draw_freq = 0;
     if args.len() > 1 {
         img_num = args[1].trim().parse().unwrap();
+        if args.len() > 2 {
+            draw_freq = args[2].trim().parse().unwrap();
+        }
     }
     println!("Processing img {img_num}");
     // first need to acquire image
@@ -127,6 +130,7 @@ fn calculate_flow_field(img0: &DynamicImage, img1: &DynamicImage, img_num: u32, 
     // calculating gradients
     let gray_img: GrayImage = img0.to_luma8();
     let next_gray_img: GrayImage = img1.to_luma8();
+    println!("grayscale images computed");
     let Ix = horizontal_sobel(&gray_img);
     let Iy = vertical_sobel(&gray_img);
     let It = map_pixels2(&gray_img, &next_gray_img, |p, q| Luma([q[0] as i16 - p[0] as i16]));    
@@ -143,7 +147,9 @@ fn calculate_flow_field(img0: &DynamicImage, img1: &DynamicImage, img_num: u32, 
     // looping over each window
     let total_rows = h/n;
     while i < total_rows {
-        println!("{i} / {total_rows} rows done");
+        if draw_freq != 0 && i % draw_freq == 0 {
+            println!("{i}/{total_rows} rows done");
+        }
         let mut j = 0;
         while j < w/n {
             let nrows: usize = (n*n) as usize;
@@ -174,7 +180,7 @@ fn calculate_flow_field(img0: &DynamicImage, img1: &DynamicImage, img_num: u32, 
                 flow_field[i as usize][j as usize] = flow.clone();
 
                 // drawing flow field on image
-                if (i * w/n + j) % draw_freq == 0 {
+                if draw_freq != 0 && (i * w/n + j) % draw_freq == 0 {
                     let start = ((j * n + n/2) as i32, (i * n + n/2) as i32);
                     let end = (start.0 + (flow.vec()[0] * t) as i32, start.1 + (flow.vec()[1] * t) as i32);
 

@@ -4,7 +4,7 @@ use imageproc::gradients::{horizontal_sobel, vertical_sobel};
 use image::Luma;
 use imageproc::map::map_pixels2;
 use imageproc::point::Point;
-use nalgebra::{DMatrix};
+use nalgebra::{SMatrix};
 use imageproc::drawing;
 use imageproc::pixelops::interpolate;
 use std::env;
@@ -152,9 +152,8 @@ fn calculate_flow_field(img0: &DynamicImage, img1: &DynamicImage, img_num: u32, 
         }
         let mut j = 0;
         while j < w/n {
-            let nrows: usize = (n*n) as usize;
-            let mut A: DMatrix<f64> = DMatrix::zeros(nrows, 2);
-            let mut b: DMatrix<f64> = DMatrix::zeros(nrows, 1);
+            let mut ATA: SMatrix<f64, 2, 2> = SMatrix::zeros();
+            let mut ATb: SMatrix<f64, 2, 1> = SMatrix::zeros();
 
             // filling out A and b matrices
             let mut y = 0;
@@ -163,19 +162,25 @@ fn calculate_flow_field(img0: &DynamicImage, img1: &DynamicImage, img_num: u32, 
                 while x < n {
                     let px = j * n + x;
                     let py = i * n + y;
-                    let col = (y * n + x) as usize;
-                    A[(col, 0)] = Ix.get_pixel(px, py)[0] as f64 / 8.;
-                    A[(col, 1)] = Iy.get_pixel(px, py)[0] as f64 / 8.;
-                    b[col] = -It.get_pixel(px, py)[0] as f64;
+
+                    let ix = Ix.get_pixel(px, py)[0] as f64 / 8.;
+                    let iy = Iy.get_pixel(px, py)[0] as f64 / 8.;
+                    ATA[(0, 0)] += ix * ix;
+                    ATA[(1, 0)] += ix * iy;
+                    ATA[(0, 1)] += iy * ix;
+                    ATA[(1, 1)] += iy * iy;
+
+                    let b = -It.get_pixel(px, py)[0] as f64;
+                    ATb[(0, 0)] += b * ix;
+                    ATb[(1, 0)] += b * iy;
 
                     x += 1;
                 }
                 y += 1;
             }
         
-            let ATA = A.transpose() * &A;
             if let Some(inv) = ATA.try_inverse() {
-                let x_star: DMatrix<f64> = inv * A.transpose() * b;
+                let x_star: SMatrix<f64, 2, 1> = inv * ATb;
                 let flow = Flow::new(true, vec![x_star[(0, 0)], x_star[(1, 0)]]);
                 flow_field[i as usize][j as usize] = flow.clone();
 
@@ -185,10 +190,6 @@ fn calculate_flow_field(img0: &DynamicImage, img1: &DynamicImage, img_num: u32, 
                     let end = (start.0 + (flow.vec()[0] * t) as i32, start.1 + (flow.vec()[1] * t) as i32);
 
                     draw_line(&mut drawing, start, end, thick_start, thick_end, color);
-
-                    // if j % save_num == 0 {
-                    //     drawing.save(&format!("flow_fields/output{}_{}_{}.png", img_num, i, j)).expect(&format!("Failed to save drawing at i={}, j={}", i, j));
-                    // }
                 }
             } else {
                 flow_field[i as usize][j as usize] = Flow::new(false, vec![0., 0.]);
@@ -197,7 +198,7 @@ fn calculate_flow_field(img0: &DynamicImage, img1: &DynamicImage, img_num: u32, 
         }
         i += 1;
     }
-    if draw_freq == 0 {
+    if draw_freq != 0 {
         drawing.save(format!("flow_fields/output{}.png", img_num)).expect("Failed to save drawing");
         println!("drawing saved");
     }

@@ -4,7 +4,7 @@ use imageproc::gradients::{horizontal_sobel, vertical_sobel};
 use image::Luma;
 use imageproc::map::map_pixels2;
 use imageproc::point::Point;
-use nalgebra::{SMatrix};
+use nalgebra::{matrix, SMatrix};
 use imageproc::drawing;
 use imageproc::pixelops::interpolate;
 use std::env;
@@ -179,7 +179,27 @@ fn calculate_flow_field(img0: &DynamicImage, img1: &DynamicImage, img_num: u32, 
                 y += 1;
             }
         
-            if let Some(inv) = ATA.try_inverse() {
+            // the off diagonal entries are equal so b = c
+            let det = ATA[(0, 0)] * ATA[(1, 1)] - ATA[(0, 1)].powf(2.); 
+
+            // prob need to tune these values
+            let epsilon = 0.001;
+            let epsilon2 = 2.5;
+            
+            // ATA is well conditioned if lambda1 is not that much greater than lambda2
+            // (aka the discriminant is not too big)
+            let h = ((ATA[(0, 0)] + ATA[(1, 1)]) * 0.5);
+            let discrim = ((ATA[(0, 0)] - ATA[(1, 1)]) * 0.5).powf(2.) + ATA[(0, 1)].powf(2.);
+            let discrim_sqrt = discrim.sqrt();
+            let lambda_min = h - discrim_sqrt;
+            let lambda_max = h + discrim_sqrt;
+
+            if lambda_min / (n*n) as f64 > epsilon && lambda_max / lambda_min < epsilon2 {
+                let inv: SMatrix<f64, 2, 2> = matrix![
+                    ATA[(1, 1)] / det, -ATA[(1, 0)] / det;
+                    -ATA[(0, 1)] / det, ATA[(0, 0)] / det
+                ];
+
                 let x_star: SMatrix<f64, 2, 1> = inv * ATb;
                 let flow = Flow::new(true, vec![x_star[(0, 0)], x_star[(1, 0)]]);
                 flow_field[i as usize][j as usize] = flow.clone();

@@ -1,25 +1,18 @@
-use image::{DynamicImage, GrayImage, ImageReader, Rgba};
 use image::GenericImageView; 
-use imageproc::gradients::{horizontal_sobel, vertical_sobel};
-use image::Luma;
-use imageproc::map::map_pixels2;
-use imageproc::point::Point;
-use nalgebra::{matrix, SMatrix};
-use imageproc::drawing;
-use imageproc::pixelops::interpolate;
 use std::env;
-pub mod flow;
-use flow::Flow;
 use std::fs::OpenOptions;
 use std::io::Write;
 use chrono::Utc;
 use std::time::{SystemTime, UNIX_EPOCH};
+use vo_system::{decode_img, get_gradients, calculate_flow_field, visualize_flow_field};
+
 
 fn main() {
 
     let args: Vec<String> = env::args().collect();
 
     const n: u32 = 15; // neighborhood size
+    let flow_scale = 80.; // scaling each flow vector when visualizing on image
 
     let mut img_num = 243;
     let mut draw_freq = 0;
@@ -45,36 +38,14 @@ fn main() {
                 .expect("wtf")
                 .as_millis();
 
-            let flow_field = calculate_flow_field(&img0, &img1, img_num, n, draw_freq);
-
-            let mut vx_avg: f64 = 0.;
-            let mut vy_avg: f64 = 0.;
-            let mut num_vecs: f64 = 0.;
-            for row in flow_field.iter() {
-                for flow in row.iter() {
-                    if flow.valid() {
-                        num_vecs += 1.;
-                        vx_avg += flow.vec()[0];
-                        vy_avg += flow.vec()[1];
-                    }
-                }
+            let (Ix, Iy, It) = get_gradients(&img0, &img1);
+            let (flow_field, avg, std) = calculate_flow_field(&Ix, &Iy, &It, n);
+            
+            if draw_freq != 0 {
+                let drawing = visualize_flow_field(&img0, &flow_field, n as usize, draw_freq, flow_scale);
+                drawing.save(format!("flow_fields/output{}.png", img_num)).expect("Failed to save drawing");
+                println!("drawing saved");
             }
-            vx_avg /= num_vecs;
-            vy_avg /= num_vecs;
-            println!("vx: {vx_avg}, vy: {vy_avg}");
-
-            let mut vx_std: f64 = 0.;
-            let mut vy_std: f64 = 0.;
-            for row in flow_field.iter() {
-                for flow in row.iter() {
-                    if flow.valid() {
-                        vx_std += (flow.vec()[0] - vx_avg).powf(2.);
-                        vy_std += (flow.vec()[1] - vy_avg).powf(2.);
-                    }
-                }
-            }
-            vx_std = (vx_std / num_vecs).sqrt();
-            vy_std = (vy_std / num_vecs).sqrt();
 
             let end_ms = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
@@ -90,7 +61,7 @@ fn main() {
                 .open("flow_fields/logs.txt")
                 .expect("Failed to open log file");
             writeln!(file, "{} | img {} | time(sec) {:.4} | vx_avg {:.4} | vy_avg {:.4} | vx_std {:.4} | vy_std {:.4}",
-                    date, img_num, time_elapsed, vx_avg, vy_avg, vx_std, vy_std)
+                    date, img_num, time_elapsed, avg[0], avg[1], std[0], std[1])
                     .expect("Failed to write to log file");
 
             println!("done with img {img_num}");
@@ -101,126 +72,3 @@ fn main() {
 
 }
 
-fn decode_img(file_path: &str) -> Result<DynamicImage, image::ImageError> {
-    ImageReader::open(file_path)?
-        .decode()
-}
-fn draw_line(img: &mut DynamicImage, start: (i32, i32), end: (i32, i32), thick1: u32, thick2: u32, color:Rgba<u8>) {
-    let Dx = end.0 - start.0;
-    let Dy = end.1 - start.1;
-    let mag: f64 = ((Dx * Dx + Dy * Dy) as f64).sqrt();
-    let dx = Dx as f64 / mag;
-    let dy = Dy as f64 / mag;
-
-    let xoff_start = (-dy * thick1 as f64 / 2.) as i32;
-    let yoff_start = (dx * thick1 as f64 / 2.) as i32;
-
-    let xoff_end = (-dy * thick2 as f64 / 2.) as i32;
-    let yoff_end = (dx * thick2 as f64 / 2.) as i32;
-
-
-    let points = [Point::new(start.0 + xoff_start, start.1 + yoff_start), Point::new(end.0 + xoff_end, end.1 + yoff_end), 
-                                   Point::new(end.0 - xoff_end, end.1 - yoff_end), Point::new(start.0 - xoff_start, start.1 - yoff_start)];
-    drawing::draw_antialiased_polygon_mut(img, &points, color, interpolate);
-}
-
-fn calculate_flow_field(img0: &DynamicImage, img1: &DynamicImage, img_num: u32, n: u32, draw_freq: u32) -> Vec<Vec<Flow>> {
-    let (w, h) = img0.dimensions();
-
-    // calculating gradients
-    let gray_img: GrayImage = img0.to_luma8();
-    let next_gray_img: GrayImage = img1.to_luma8();
-    println!("grayscale images computed");
-    let Ix = horizontal_sobel(&gray_img);
-    let Iy = vertical_sobel(&gray_img);
-    let It = map_pixels2(&gray_img, &next_gray_img, |p, q| Luma([q[0] as i16 - p[0] as i16]));    
-    println!("Ix, Iy, and It computed");
-
-    let mut flow_field = vec![vec![Flow::new(false, vec![0., 0.]); (w/n) as usize]; (h/n) as usize];
-    let mut drawing = img0.clone();
-    let t: f64 = 80.;
-    let color = Rgba([255, 255, 255, 100]);
-    let thick_start = 16;
-    let thick_end = 4;
-    let mut i = 0;
-
-    // looping over each window
-    let total_rows = h/n;
-    while i < total_rows {
-        if draw_freq != 0 && i % draw_freq == 0 {
-            println!("{i}/{total_rows} rows done");
-        }
-        let mut j = 0;
-        while j < w/n {
-            let mut ATA: SMatrix<f64, 2, 2> = SMatrix::zeros();
-            let mut ATb: SMatrix<f64, 2, 1> = SMatrix::zeros();
-
-            // filling out A and b matrices
-            let mut y = 0;
-            while y < n {
-                let mut x = 0;
-                while x < n {
-                    let px = j * n + x;
-                    let py = i * n + y;
-
-                    let ix = Ix.get_pixel(px, py)[0] as f64 / 8.;
-                    let iy = Iy.get_pixel(px, py)[0] as f64 / 8.;
-                    ATA[(0, 0)] += ix * ix;
-                    ATA[(1, 0)] += ix * iy;
-                    ATA[(0, 1)] += iy * ix;
-                    ATA[(1, 1)] += iy * iy;
-
-                    let b = -It.get_pixel(px, py)[0] as f64;
-                    ATb[(0, 0)] += b * ix;
-                    ATb[(1, 0)] += b * iy;
-
-                    x += 1;
-                }
-                y += 1;
-            }
-        
-            // the off diagonal entries are equal so b = c
-            let det = ATA[(0, 0)] * ATA[(1, 1)] - ATA[(0, 1)].powf(2.); 
-
-            // prob need to tune these values
-            let epsilon = 0.001;
-            let epsilon2 = 2.5;
-            
-            // ATA is well conditioned if lambda1 is not that much greater than lambda2
-            // (aka the discriminant is not too big)
-            let h = ((ATA[(0, 0)] + ATA[(1, 1)]) * 0.5);
-            let discrim = ((ATA[(0, 0)] - ATA[(1, 1)]) * 0.5).powf(2.) + ATA[(0, 1)].powf(2.);
-            let discrim_sqrt = discrim.sqrt();
-            let lambda_min = h - discrim_sqrt;
-            let lambda_max = h + discrim_sqrt;
-
-            if lambda_min / (n*n) as f64 > epsilon && lambda_max / lambda_min < epsilon2 {
-                let inv: SMatrix<f64, 2, 2> = matrix![
-                    ATA[(1, 1)] / det, -ATA[(1, 0)] / det;
-                    -ATA[(0, 1)] / det, ATA[(0, 0)] / det
-                ];
-
-                let x_star: SMatrix<f64, 2, 1> = inv * ATb;
-                let flow = Flow::new(true, vec![x_star[(0, 0)], x_star[(1, 0)]]);
-                flow_field[i as usize][j as usize] = flow.clone();
-
-                // drawing flow field on image
-                if draw_freq != 0 && (i * w/n + j) % draw_freq == 0 {
-                    let start = ((j * n + n/2) as i32, (i * n + n/2) as i32);
-                    let end = (start.0 + (flow.vec()[0] * t) as i32, start.1 + (flow.vec()[1] * t) as i32);
-
-                    draw_line(&mut drawing, start, end, thick_start, thick_end, color);
-                }
-            } else {
-                flow_field[i as usize][j as usize] = Flow::new(false, vec![0., 0.]);
-            }
-            j += 1;
-        }
-        i += 1;
-    }
-    if draw_freq != 0 {
-        drawing.save(format!("flow_fields/output{}.png", img_num)).expect("Failed to save drawing");
-        println!("drawing saved");
-    }
-    flow_field
-}

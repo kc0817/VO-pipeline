@@ -2,6 +2,7 @@
 name = "vo_system"
 version = "0.1.0"
 edition = "2024"
+default-run = "vo_system"
 
 [dependencies]
 image = "0.25.10"

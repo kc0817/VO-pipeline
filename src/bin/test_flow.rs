@@ -13,7 +13,7 @@ fn main() {
     let y: u32 = args[4].parse().unwrap();
     let n = 15;
     let flow_scale = 80.;
-    let thick1: u32 = 8;
+    let thick1: u32 = 10;
     let thick2: u32 = 4;
     // // RUN THIS FILE FROM VO SYSTEM NOT SRC DIRECTORY IN TERMINAL
     let path = format!("flow_fields/compressed{}x{}.png", compress_num, img_num);
@@ -37,7 +37,7 @@ fn main() {
     let start = ((x * n + n/2) as i32, (y * n + n/2) as i32);
     if f.valid() {
         let end = ((start.0 as f64 + f.vec()[0] * flow_scale) as i32, (start.1 as f64 + f.vec()[1] * flow_scale) as i32);
-        draw_arrow(&mut drawing, start, end, 10, 4, Luma([255]));
+        draw_arrow(&mut drawing, start, end, thick1, thick2, Luma([255]));
     }
     // drawing eigenvectors
     let black = Luma([0]);

@@ -32,34 +32,16 @@ fn apply_kernel(img: &GrayImage, x: i32, y: i32, w: i32, h: i32) -> u8 {
     + 0.0625 * (img.get_pixel(l, u)[0] as f64 + img.get_pixel(l, d)[0] as f64 + img.get_pixel(r, u)[0] as f64 + img.get_pixel(r, d)[0] as f64)
     ).round() as u8
 }
-pub fn draw_arrow(img: &mut GrayImage, start: (i32, i32), end: (i32, i32), thick1: u32, thick2: u32, shade:Luma<u8>) {
-    let Dx = end.0 - start.0;
-    let Dy = end.1 - start.1;
-    let mag: f64 = ((Dx * Dx + Dy * Dy) as f64).sqrt();
-    let dx = Dx as f64 / mag;
-    let dy = Dy as f64 / mag;
-
-    let xoff_start = (-dy * thick1 as f64 / 2.) as i32;
-    let yoff_start = (dx * thick1 as f64 / 2.) as i32;
-
-    let xoff_end = (-dy * thick2 as f64 / 2.) as i32;
-    let yoff_end = (dx * thick2 as f64 / 2.) as i32;
-
-
-    let points = [Point::new(start.0 + xoff_start, start.1 + yoff_start), Point::new(end.0 + xoff_end, end.1 + yoff_end), 
-                                   Point::new(end.0 - xoff_end, end.1 - yoff_end), Point::new(start.0 - xoff_start, start.1 - yoff_start)];
-    drawing::draw_antialiased_polygon_mut(img, &points, shade, interpolate);
-}
 
 pub fn get_grayscale(img: &DynamicImage) -> GrayImage {
     img.to_luma8()
 }
 pub fn get_gradients(gray_img: &GrayImage, next_gray_img: &GrayImage) -> (ImageBuffer<Luma<i16>, Vec<i16>>, ImageBuffer<Luma<i16>, Vec<i16>>, ImageBuffer<Luma<i16>, Vec<i16>>) {
-    println!("grayscale images computed");
+    // println!("grayscale images computed");
     let Ix = horizontal_sobel(&gray_img);
     let Iy = vertical_sobel(&gray_img);
     let It = map_pixels2(&gray_img, &next_gray_img, |p, q| Luma([q[0] as i16 - p[0] as i16]));    
-    println!("Ix, Iy, and It computed");
+    // println!("Ix, Iy, and It computed");
     (Ix, Iy, It)
 }
 pub fn calculate_flow_field(Ix: &ImageBuffer<Luma<i16>, Vec<i16>>, Iy: &ImageBuffer<Luma<i16>, Vec<i16>>, It: &ImageBuffer<Luma<i16>, Vec<i16>>, n: u32) -> (Vec<Vec<Flow>>, Vec<f64>, Vec<f64>) {
@@ -100,37 +82,8 @@ pub fn calculate_flow_field(Ix: &ImageBuffer<Luma<i16>, Vec<i16>>, Iy: &ImageBuf
     std[0] = (std[0] / num_good_flow).sqrt();
     std[1] = (std[1] / num_good_flow).sqrt();
 
-    println!("flow field calculated");
+    // println!("flow field calculated");
     (flow_field, avg, std)
-}
-
-pub fn visualize_flow_field(img: &GrayImage, flow_field: &Vec<Vec<Flow>>, n: usize, draw_freq: usize, flow_scale: f64) -> GrayImage {
-    let mut i: usize = 0;
-    let mut drawing = img.clone();
-
-    // drawing parameters
-    let thick_start = 8;
-    let thick_end = 2;
-    let shade = Luma([255]);
-    while i < flow_field.len() {
-        let mut j: usize = 0;
-        while j < flow_field[i].len() {
-            let f = &flow_field[i][j];
-            if f.valid() {
-                // drawing flow field on image
-                let count = i * flow_field[0].len() + j;
-                if count % draw_freq == 0 {
-                    let start = ((j * n + n/2) as i32, (i * n + n/2) as i32);
-                    let end = (start.0 + (f.vec()[0] * flow_scale) as i32, start.1 + (f.vec()[1] * flow_scale) as i32);
-
-                    draw_arrow(&mut drawing, start, end, thick_start, thick_end, shade);
-                }
-            }
-            j += 1;
-        }
-        i += 1;
-    };
-    drawing
 }
 
 pub fn calc_flow_vec(Ix: &ImageBuffer<Luma<i16>, Vec<i16>>, 
@@ -203,3 +156,50 @@ pub fn calc_flow_vec(Ix: &ImageBuffer<Luma<i16>, Vec<i16>>,
 }
 
 
+pub fn visualize_flow_field(img: &GrayImage, flow_field: &Vec<Vec<Flow>>, n: usize, draw_freq: usize, flow_scale: f64) -> GrayImage {
+    let mut i: usize = 0;
+    let mut drawing = img.clone();
+
+    // drawing parameters
+    let thick_start = 8;
+    let thick_end = 2;
+    let shade = Luma([255]);
+    while i < flow_field.len() {
+        let mut j: usize = 0;
+        while j < flow_field[i].len() {
+            let f = &flow_field[i][j];
+            if f.valid() {
+                // drawing flow field on image
+                let count = i * flow_field[0].len() + j;
+                if count % draw_freq == 0 {
+                    let start = ((j * n + n/2) as i32, (i * n + n/2) as i32);
+                    let end = (start.0 + (f.vec()[0] * flow_scale) as i32, start.1 + (f.vec()[1] * flow_scale) as i32);
+
+                    draw_arrow(&mut drawing, start, end, thick_start, thick_end, shade);
+                }
+            }
+            j += 1;
+        }
+        i += 1;
+    };
+    drawing
+}
+
+pub fn draw_arrow(img: &mut GrayImage, start: (i32, i32), end: (i32, i32), thick1: u32, thick2: u32, shade:Luma<u8>) {
+    let Dx = end.0 - start.0;
+    let Dy = end.1 - start.1;
+    let mag: f64 = ((Dx * Dx + Dy * Dy) as f64).sqrt();
+    let dx = Dx as f64 / mag;
+    let dy = Dy as f64 / mag;
+
+    let xoff_start = (-dy * thick1 as f64 / 2.) as i32;
+    let yoff_start = (dx * thick1 as f64 / 2.) as i32;
+
+    let xoff_end = (-dy * thick2 as f64 / 2.) as i32;
+    let yoff_end = (dx * thick2 as f64 / 2.) as i32;
+
+
+    let points = [Point::new(start.0 + xoff_start, start.1 + yoff_start), Point::new(end.0 + xoff_end, end.1 + yoff_end), 
+                                   Point::new(end.0 - xoff_end, end.1 - yoff_end), Point::new(start.0 - xoff_start, start.1 - yoff_start)];
+    drawing::draw_antialiased_polygon_mut(img, &points, shade, interpolate);
+}

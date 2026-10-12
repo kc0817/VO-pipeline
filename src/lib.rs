@@ -1,6 +1,6 @@
 pub mod flow;
 
-use image::{DynamicImage, GrayImage, ImageBuffer, GenericImageView, open};
+use image::{DynamicImage, GrayImage, ImageBuffer, open};
 use imageproc::gradients::{horizontal_sobel, vertical_sobel};
 use image::Luma;
 use imageproc::map::map_pixels2;

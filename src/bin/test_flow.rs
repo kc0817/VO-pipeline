@@ -1,8 +1,6 @@
-use vo_system::{get_img, get_gradients, calc_flow_vec};
-use imageproc::drawing::{draw_hollow_rect_mut, draw_antialiased_polygon_mut};
-use imageproc::pixelops::interpolate;
+use vo_system::{get_img, get_gradients, calc_flow_vec, draw_arrow};
+use imageproc::drawing::{draw_hollow_rect_mut};
 use imageproc::rect::Rect;
-use imageproc::point::Point;
 use image::Luma;
 use std::env;
 use std::fs::OpenOptions;
@@ -36,24 +34,21 @@ fn main() {
     draw_hollow_rect_mut(&mut drawing, rect, Luma([255u8]));
     
     println!("f valid: {}", f.valid());
+    let start = ((x * n + n/2) as i32, (y * n + n/2) as i32);
     if f.valid() {
-        let start = ((x * n + n/2) as i32, (y * n + n/2) as i32);
         let end = ((start.0 as f64 + f.vec()[0] * flow_scale) as i32, (start.1 as f64 + f.vec()[1] * flow_scale) as i32);
-        let Dx = end.0 - start.0;
-        let Dy = end.1 - start.1;
-        let mag: f64 = ((Dx * Dx + Dy * Dy) as f64).sqrt();
-        let dx = Dx as f64 / mag;
-        let dy = Dy as f64 / mag;
-
-        let xoff_start = (-dy * thick1 as f64 / 2.) as i32;
-        let yoff_start = (dx * thick1 as f64 / 2.) as i32;
-
-        let xoff_end = (-dy * thick2 as f64 / 2.) as i32;
-        let yoff_end = (dx * thick2 as f64 / 2.) as i32;
-        let points = [Point::new(start.0 + xoff_start, start.1 + yoff_start), Point::new(end.0 + xoff_end, end.1 + yoff_end), 
-                                    Point::new(end.0 - xoff_end, end.1 - yoff_end), Point::new(start.0 - xoff_start, start.1 - yoff_start)];
-        draw_antialiased_polygon_mut(&mut drawing, &points, Luma([255]), interpolate);
+        draw_arrow(&mut drawing, start, end, 10, 4, Luma([255]));
     }
+    // drawing eigenvectors
+    let black = Luma([0]);
+    let eigen_scale = 1./500.;
+    let end1 = (start.0 + (f.eigen_vec_min()[0] * f.eigen_min() * eigen_scale) as i32,
+                            start.1 + (f.eigen_vec_min()[1] * f.eigen_min() * eigen_scale) as i32);
+    draw_arrow(&mut drawing, start, end1, 2, 2, black);
+    let end2 = (start.0 + (f.eigen_vec_max()[0] * f.eigen_min() * f.eigen_ratio() * eigen_scale) as i32,
+                            start.1 + (f.eigen_vec_max()[1] * f.eigen_min() * f.eigen_ratio() * eigen_scale) as i32);
+    draw_arrow(&mut drawing, start, end2, 4, 4, black);
+
     
     drawing.save(format!("flow_fields/rectat{}-{}compress{}x_imgnum{}.png", x, y, compress_num, img_num)).expect("Failed to save drawing");
 

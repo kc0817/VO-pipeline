@@ -30,9 +30,9 @@ fn apply_kernel(img: &GrayImage, x: i32, y: i32, w: i32, h: i32) -> u8 {
     (0.25 * img.get_pixel(x as u32, y as u32)[0] as f64
     + 0.125 * (img.get_pixel(l, y as u32)[0] as f64 + img.get_pixel(r, y as u32)[0] as f64 + img.get_pixel(x as u32, u)[0] as f64 + img.get_pixel(x as u32, d)[0] as f64)
     + 0.0625 * (img.get_pixel(l, u)[0] as f64 + img.get_pixel(l, d)[0] as f64 + img.get_pixel(r, u)[0] as f64 + img.get_pixel(r, d)[0] as f64)
-    ) as u8
+    ).round() as u8
 }
-pub fn draw_line(img: &mut GrayImage, start: (i32, i32), end: (i32, i32), thick1: u32, thick2: u32, shade:Luma<u8>) {
+pub fn draw_arrow(img: &mut GrayImage, start: (i32, i32), end: (i32, i32), thick1: u32, thick2: u32, shade:Luma<u8>) {
     let Dx = end.0 - start.0;
     let Dy = end.1 - start.1;
     let mag: f64 = ((Dx * Dx + Dy * Dy) as f64).sqrt();
@@ -123,7 +123,7 @@ pub fn visualize_flow_field(img: &GrayImage, flow_field: &Vec<Vec<Flow>>, n: usi
                     let start = ((j * n + n/2) as i32, (i * n + n/2) as i32);
                     let end = (start.0 + (f.vec()[0] * flow_scale) as i32, start.1 + (f.vec()[1] * flow_scale) as i32);
 
-                    draw_line(&mut drawing, start, end, thick_start, thick_end, shade);
+                    draw_arrow(&mut drawing, start, end, thick_start, thick_end, shade);
                 }
             }
             j += 1;
@@ -168,27 +168,28 @@ pub fn calc_flow_vec(Ix: &ImageBuffer<Luma<i16>, Vec<i16>>,
     let det = ATA[(0, 0)] * ATA[(1, 1)] - ATA[(0, 1)].powf(2.); 
 
     // prob need to tune these values
-    let min_lambda: f64 = 0.;
-    let max_lambda_ratio: f64 = 500.;
+    let min_lambda: f64 = 22.2;
+    let max_lambda_ratio: f64 = 3.;
     
     // ATA is well conditioned if lambda1 is not that much greater than lambda2
     // (aka the discriminant is not too big)
     let h = (ATA[(0, 0)] + ATA[(1, 1)]) * 0.5; // (a + d)/2
     let discrim = ((ATA[(0, 0)] - ATA[(1, 1)]) * 0.5).powf(2.) + ATA[(0, 1)].powf(2.);
     let discrim_sqrt = discrim.sqrt();
-    let eigen_min = h - discrim_sqrt;
-    let eigen_ratio = (h + discrim_sqrt) / eigen_min;
+    let eigen_min = (h - discrim_sqrt) / (n * n) as f64;
+    let eigen_ratio = if eigen_min.abs() < 0.00001 { 0. } else { (h + discrim_sqrt) / (n * n) as f64 / eigen_min };
 
-    // only used in test_flow.rs
-    println!("eigen min: {}", eigen_min);
-    println!("eigen ratio: {}", eigen_ratio);
+    let eigen_vec_min: Vec<f64> = if ATA[(0, 1)].abs() < 0.00001 {
+        if ATA[(0, 0)] > ATA[(1, 1)] { vec![0., 1.] }
+        else { vec![1., 0.] }
+    } else {
+        let k_min = (ATA[(0, 0)] - eigen_min) / ATA[(0, 1)];
+        let eigen_vec_min_mag = (1. + k_min * k_min).sqrt();
+        vec![1. / eigen_vec_min_mag, -k_min / eigen_vec_min_mag]
+    };
+    let eigen_vec_max: Vec<f64> = vec![-eigen_vec_min[1], eigen_vec_min[0]];
 
-    let k_min = (ATA[(0, 0)] - eigen_min) / ATA[(0, 1)];
-    let eigen_vec_min_mag = (k_min.powf(4.) + k_min.powf(2.)).sqrt() / k_min;
-    let eigen_vec_min: Vec<f64> = vec![-1./k_min / eigen_vec_min_mag, k_min / eigen_vec_min_mag];
-    let eigen_vec_max: Vec<f64> = vec![-eigen_vec_min[1], eigen_vec_min[0]]; // 2 eigenvectors are orthogonal to each other
-
-    if eigen_min / (n*n) as f64 > min_lambda && eigen_ratio < max_lambda_ratio {
+    if eigen_min > min_lambda && eigen_ratio < max_lambda_ratio {
         let inv: SMatrix<f64, 2, 2> = matrix![
             ATA[(1, 1)] / det, -ATA[(1, 0)] / det;
             -ATA[(0, 1)] / det, ATA[(0, 0)] / det

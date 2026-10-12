@@ -50,15 +50,17 @@ fn main() {
     
     if draw_freq != 0 {
         let drawing;
+        let path;
         if draw_freq < 0 {
             drawing = img0.clone();
-            drawing.save(format!("flow_fields/compressed{}x{}.png", compress_num, img_num)).expect("Failed to save drawing");
+            path = format!("flow_fields/compressed{}x{}.png", compress_num, img_num);
         }
         else {
             drawing = visualize_flow_field(&img0, &flow_field, n as usize, draw_freq as usize, flow_scale);
-            drawing.save(format!("flow_fields/labeled{}x{}.png", compress_num, img_num)).expect("Failed to save drawing");
+            path = format!("flow_fields/labeled{}x{}.png", compress_num, img_num);
         }
-        println!("drawing saved");
+        drawing.save(&path).expect("Failed to save drawing");
+        println!("drawing saved at {path}");
     }
 
     let end_ms = SystemTime::now()

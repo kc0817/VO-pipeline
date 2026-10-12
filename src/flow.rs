@@ -31,4 +31,10 @@ impl Flow {
     pub fn eigen_ratio(&self) -> f64 {
         self.eigen_ratio
     }
+    pub fn eigen_vec_min(&self) -> Vec<f64> {
+        self.eigen_vec_min.clone()
+    }
+    pub fn eigen_vec_max(&self) -> Vec<f64> {
+        self.eigen_vec_max.clone()
+    }
 }

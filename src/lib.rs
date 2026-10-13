@@ -44,7 +44,11 @@ pub fn get_gradients(gray_img: &GrayImage, next_gray_img: &GrayImage) -> (ImageB
     // println!("Ix, Iy, and It computed");
     (Ix, Iy, It)
 }
-pub fn calculate_flow_field(Ix: &ImageBuffer<Luma<i16>, Vec<i16>>, Iy: &ImageBuffer<Luma<i16>, Vec<i16>>, It: &ImageBuffer<Luma<i16>, Vec<i16>>, n: u32) -> (Vec<Vec<Flow>>, Vec<f64>, Vec<f64>) {
+pub fn calculate_flow_field(Ix: &ImageBuffer<Luma<i16>, Vec<i16>>, 
+    Iy: &ImageBuffer<Luma<i16>, Vec<i16>>, 
+    It: &ImageBuffer<Luma<i16>, Vec<i16>>, 
+    n: u32,
+    testing: bool) -> (Vec<Vec<Flow>>, Vec<f64>, Vec<f64>) {
     let (w, h) = Ix.dimensions();
 
     let mut flow_field = vec![vec![Flow::new(false, vec![0., 0.], 0., 0., vec![0., 0.], vec![0., 0.]); (w/n) as usize]; (h/n) as usize];
@@ -57,7 +61,7 @@ pub fn calculate_flow_field(Ix: &ImageBuffer<Luma<i16>, Vec<i16>>, Iy: &ImageBuf
     while i < total_rows {
         let mut j = 0;
         while j < w/n {
-            let f = calc_flow_vec(&Ix, &Iy, &It, n, i, j);
+            let f = calc_flow_vec(&Ix, &Iy, &It, n, i, j, testing);
             if f.valid() {
                 avg[0] += f.vec()[0];
                 avg[1] += f.vec()[1];
@@ -89,7 +93,8 @@ pub fn calculate_flow_field(Ix: &ImageBuffer<Luma<i16>, Vec<i16>>, Iy: &ImageBuf
 pub fn calc_flow_vec(Ix: &ImageBuffer<Luma<i16>, Vec<i16>>, 
         Iy: &ImageBuffer<Luma<i16>, Vec<i16>>,
         It: &ImageBuffer<Luma<i16>, Vec<i16>>,
-        n: u32, i: u32, j: u32) -> Flow {
+        n: u32, i: u32, j: u32,
+        testing: bool) -> Flow {
     let mut ATA: SMatrix<f64, 2, 2> = SMatrix::zeros();
     let mut ATb: SMatrix<f64, 2, 1> = SMatrix::zeros();
 
@@ -129,8 +134,9 @@ pub fn calc_flow_vec(Ix: &ImageBuffer<Luma<i16>, Vec<i16>>,
     let h = (ATA[(0, 0)] + ATA[(1, 1)]) * 0.5; // (a + d)/2
     let discrim = ((ATA[(0, 0)] - ATA[(1, 1)]) * 0.5).powf(2.) + ATA[(0, 1)].powf(2.);
     let discrim_sqrt = discrim.sqrt();
-    let eigen_min = (h - discrim_sqrt) / (n * n) as f64;
-    let eigen_ratio = if eigen_min.abs() < 0.00001 { 0. } else { (h + discrim_sqrt) / (n * n) as f64 / eigen_min };
+    let eigen_min = h - discrim_sqrt;
+    let scaled_eigen_min = eigen_min / (n * n) as f64;
+    let eigen_ratio = if eigen_min.abs() < 0.00001 { 0. } else { (h + discrim_sqrt) / eigen_min };
 
     let eigen_vec_min: Vec<f64> = if ATA[(0, 1)].abs() < 0.00001 {
         if ATA[(0, 0)] > ATA[(1, 1)] { vec![0., 1.] }
@@ -142,16 +148,16 @@ pub fn calc_flow_vec(Ix: &ImageBuffer<Luma<i16>, Vec<i16>>,
     };
     let eigen_vec_max: Vec<f64> = vec![-eigen_vec_min[1], eigen_vec_min[0]];
 
-    if eigen_min > min_lambda && eigen_ratio < max_lambda_ratio {
+    if testing || (scaled_eigen_min > min_lambda && eigen_ratio < max_lambda_ratio) {
         let inv: SMatrix<f64, 2, 2> = matrix![
             ATA[(1, 1)] / det, -ATA[(1, 0)] / det;
             -ATA[(0, 1)] / det, ATA[(0, 0)] / det
         ];
 
         let x_star: SMatrix<f64, 2, 1> = inv * ATb;
-        Flow::new(true, vec![x_star[(0, 0)], x_star[(1, 0)]], eigen_min, eigen_ratio, eigen_vec_min, eigen_vec_max)
+        Flow::new(true, vec![x_star[(0, 0)], x_star[(1, 0)]], scaled_eigen_min, eigen_ratio, eigen_vec_min, eigen_vec_max)
     } else {
-        Flow::new(false, vec![0., 0.], eigen_min, eigen_ratio, eigen_vec_min, eigen_vec_max)
+        Flow::new(false, vec![0., 0.], scaled_eigen_min, eigen_ratio, eigen_vec_min, eigen_vec_max)
     }
 }
 

@@ -38,7 +38,7 @@ fn main() {
     let mut visualized_imgs: Vec<GrayImage> = Vec::new();
     for i in 0..(compressed_imgs.len()-1) {
         let (hori_grad, vert_grad, intensity_diff) = get_gradients(&compressed_imgs[i as usize], &compressed_imgs[(i+1) as usize]);
-        let (_, avg_flow, _) = calculate_flow_field(&hori_grad, &vert_grad, &intensity_diff, window_size);
+        let (_, avg_flow, _) = calculate_flow_field(&hori_grad, &vert_grad, &intensity_diff, window_size, false);
         let mut drawing = compressed_imgs[i as usize].clone();
         let end = (center.0 + (avg_flow[0] * arrow_scale) as i32, center.1 + (avg_flow[1] * arrow_scale) as i32);
         draw_arrow(&mut drawing, center, end, thick1, thick2, arrow_shade);
@@ -48,8 +48,8 @@ fn main() {
     println!("Flow calculations and visualizations finished; saving drawings");
 
     // saving visualizations as video
-    let save_path = format!("videos/frame{}-{}compresion{}x.mp4", start_img, end_img, compress_num);
     let fps = 60;
+    let save_path = format!("videos/frame{}-{}compress{}xfps{}.mp4", start_img, end_img, compress_num, fps);
     let mut ffmpeg = Command::new("ffmpeg")
         .args([
             "-y",

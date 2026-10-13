@@ -5,3 +5,4 @@ __pycache__/
 !/data/README.md
 /flow_fields/*
 /videos/*
+/window_analysis/*

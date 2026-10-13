@@ -15,12 +15,23 @@ pub fn get_img(file_path: &str) -> DynamicImage {
     let img = open(file_path).expect("Failed to open image");
     img
 }
-pub fn get_compressed_img(img: GrayImage) -> GrayImage {
-    let (w, h) = img.dimensions();
-    let compressed = GrayImage::from_fn(w/2, h/2, |x, y| {
-        Luma([apply_kernel(&img, (x*2) as i32, (y*2) as i32, w as i32, h as i32)])
-    });
+pub fn get_compressed_img(img: GrayImage, num_compressions: u32) -> GrayImage {
+    let mut compressed = img;
+    for _ in 0..num_compressions {
+        let (w, h) = compressed.dimensions();
+        compressed = GrayImage::from_fn(w/2, h/2, |x, y| {
+            Luma([apply_kernel(&compressed, (x*2) as i32, (y*2) as i32, w as i32, h as i32)])
+        });
+    }
     compressed
+}
+pub fn get_shifted_img(img: &GrayImage, dx: i32, dy: i32) -> GrayImage {
+    let (w, h) = img.dimensions();
+    GrayImage::from_fn(w, h, |x, y| {
+        let new_x = cmp::max(0, cmp::min(w as i32 -1, x as i32 -dx)) as u32;
+        let new_y = cmp::max(0, cmp::min(h as i32 -1, y as i32 -dy)) as u32;
+        img.get_pixel(new_x, new_y).clone()
+    })
 }
 fn apply_kernel(img: &GrayImage, x: i32, y: i32, w: i32, h: i32) -> u8 {
     let l = cmp::max(0, x-1) as u32;
@@ -126,8 +137,8 @@ pub fn calc_flow_vec(Ix: &ImageBuffer<Luma<i16>, Vec<i16>>,
     let det = ATA[(0, 0)] * ATA[(1, 1)] - ATA[(0, 1)].powf(2.); 
 
     // prob need to tune these values
-    let min_lambda: f64 = 22.2;
-    let max_lambda_ratio: f64 = 3.;
+    let min_lambda: f64 = 11.; // compress 4: 22.2
+    let max_lambda_ratio: f64 = 4.; // compress 4: 3
     
     // ATA is well conditioned if lambda1 is not that much greater than lambda2
     // (aka the discriminant is not too big)

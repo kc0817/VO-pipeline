@@ -4,6 +4,7 @@ use vo_system::{get_img, get_grayscale, get_compressed_img, get_gradients, calcu
 use std::io::Write;
 use std::process::{Command, Stdio};
 fn main() {
+    // arg list: start_img, end_img, compress, window_size
     let args: Vec<String> = env::args().collect();
     let start_img: u32 = args[1].trim().parse().unwrap();
     let end_img: u32 = args[2].trim().parse().unwrap();
@@ -23,10 +24,7 @@ fn main() {
     let mut compressed_imgs: Vec<GrayImage> = Vec::new();
     for i in start_img..end_img {
         let path = format!("data/frame{}.png", i);
-        let mut compressed = get_grayscale(&get_img(&path));
-        for _ in 0..compress_num {
-            compressed = get_compressed_img(compressed);
-        }
+        let compressed = get_compressed_img(get_grayscale(&get_img(&path)), compress_num);
         compressed_imgs.push(compressed);
     }
     let (w, h) = compressed_imgs[0].dimensions();

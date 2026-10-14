@@ -3,7 +3,6 @@ pub mod flow;
 use image::{DynamicImage, GrayImage, ImageBuffer, open};
 use imageproc::gradients::{horizontal_sobel, vertical_sobel};
 use image::Luma;
-use imageproc::map::map_pixels2;
 use imageproc::point::Point;
 use nalgebra::{matrix, SMatrix};
 use imageproc::drawing;
@@ -71,7 +70,10 @@ pub fn get_gradients(gray_img: &GrayImage, next_gray_img: &GrayImage) -> (ImageB
     // println!("grayscale images computed");
     let Ix = horizontal_sobel(&gray_img);
     let Iy = vertical_sobel(&gray_img);
-    let It = map_pixels2(&gray_img, &next_gray_img, |p, q| Luma([q[0] as i16 - p[0] as i16]));    
+    let (w, h) = gray_img.dimensions();
+    let It = ImageBuffer::from_fn(w, h, |x, y| {
+        Luma([next_gray_img.get_pixel(x, y)[0] as i16 - gray_img.get_pixel(x, y)[0] as i16])
+    });
     // println!("Ix, Iy, and It computed");
     (Ix, Iy, It)
 }

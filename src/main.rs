@@ -1,92 +1,82 @@
 use std::env;
-use std::fs::OpenOptions;
-use std::io::Write;
-use chrono::Utc;
-use std::time::{SystemTime, UNIX_EPOCH};
-use vo_system::{get_img, get_grayscale, get_compressed_img, get_shifted_img, get_gradients, calculate_flow_field, calc_flow_vec, visualize_flow_field};
+use image::{GrayImage, Luma};
+use vo_system::{get_img, get_compressed_img, get_lambda_thresholds, get_shifted_img, 
+    get_gradients, calculate_flow_field, draw_arrow, make_video};
+use std::cmp;
 
 
 fn main() {
 
     let args: Vec<String> = env::args().collect();
+    let window_size = 15;
+    let start_img: u32 = args[1].trim().parse().unwrap();
+    let end_img: u32 = args[2].trim().parse().unwrap();
+    let compress_fine: u32 = args[3].trim().parse().unwrap();
+    let compress_coarse: u32 = args[4].trim().parse().unwrap();
+    let num_levels = (compress_coarse - compress_fine) as usize + 1;
+    let mut imgs: Vec<Vec<GrayImage>> = Vec::new();
 
-    const n: u32 = 15; // neighborhood size
-    let flow_scale = 80.; // scaling each flow vector when visualizing on image
+    for i in start_img..end_img {
+        let path = format!("data/frame{i}.png");
+        let fine = get_compressed_img(get_img(&path).to_luma8(), compress_fine);
+        imgs.push(vec![fine; num_levels]);
+        for j in 1..num_levels {
+            imgs[(i-start_img) as usize][j as usize] = get_compressed_img(imgs[(i-start_img) as usize][(j-1) as usize].clone(), 1);
+        }
+    }
 
-    let img_num: i32 = args[1].trim().parse().unwrap();
-    // let compress_num: u32 = args[2].trim().parse().unwrap();
-    // let draw_freq: i32 = args[3].trim().parse().unwrap();
-    // println!("Processing img {img_num}, compress num {compress_num} draw_freq {draw_freq}");
-    // first need to acquire image
-    let img0_path = format!("data/frame{}.png", img_num);
-    let img1_path = format!("data/frame{}.png", img_num+1);
+    println!("Image compressions finished; starting flow calculations");
+    let mut flow_guesses: Vec<Vec<f64>> = Vec::new();
 
-    // println!("Starting time benchmark");
-    let img0 = get_compressed_img(get_grayscale(&get_img(&img0_path)), 4);
-    let img1 = get_shifted_img(&img0, 3, 0);
-    let (Ix, Iy, It) = get_gradients(&img0, &img1);
-    let window_x = 4;
-    let window_y = 4;
+    // iterating over each image
+    for i in 0..(imgs.len()-1) {
+        let mut flow_guess: Vec<f64> = vec![0., 0.];
+        // iterating over each compression from coarse to fine
+        for j in 0..num_levels {
+            let index = num_levels -1 -j;
+            let dx = -flow_guess[0].round() as i32;
+            let dy = -flow_guess[1].round() as i32;
+            let shifted_img = get_shifted_img(
+                &imgs[i+1][index], 
+                dx, 
+                dy);
+            
+            let (Ix, Iy, It) = get_gradients(&imgs[i][index], &shifted_img);
+            let (min_lambda, max_lambda_ratio) = get_lambda_thresholds(compress_fine + index as u32);
+            let (w, h) = imgs[i][index].dimensions();
+            let (_, avg, _) = calculate_flow_field(&Ix, &Iy, &It, window_size, 
+                min_lambda, max_lambda_ratio,
+                cmp::max(0, dx) as u32, cmp::max(0, dy) as u32,
+                (cmp::min(dx, 0) + w as i32) as u32, (cmp::min(dy, 0) + h as i32) as u32);
+            
+            flow_guess[0] = (flow_guess[0].round() + avg[0]) * 2.;
+            flow_guess[1] = (flow_guess[1].round() + avg[1]) * 2.;
+        }
 
-    let f = calc_flow_vec(&Ix, &Iy, &It, n, window_y, window_x, true);
-    println!("vx {}, vy {}", f.vec()[0], f.vec()[1]);
+        // keeping this commented so video arrows are to scale
+        // let remaining_scale = 2_f64.powf(compress_fine as f64-1.);
+        // flow_guess[0] *= remaining_scale;
+        // flow_guess[1] *= remaining_scale;
 
-    // let img00 = get_compressed_img(img0, 1);
-    // let img11 = get_compressed_img(img1, 1);
-    // let (Ix, Iy, It) = get_gradients(&img00, &img11);
-    // let window_x = 2;
-    // let window_y = 2;
-    // let f = calc_flow_vec(&Ix, &Iy, &It, n, window_y, window_x, true);
-    // println!("vx {}, vy {}", f.vec()[0], f.vec()[1]);
-    // let img1 = get_compressed_img(get_grayscale(&get_img(&img1_path)), compress_num);
+        flow_guesses.push(flow_guess);
+    }
 
-    // let (w, h) = img0.dimensions();
-    // println!("Image dimensions: {w} x {h} pixels");
+    // visualizing images
+    let mut drawings: Vec<GrayImage> = Vec::new();
+    let (w, h) = imgs[0][0].dimensions();
+    let center = (w as i32/2, h as i32/2);
+    let thick1 = 8;
+    let thick2 = 2;
+    let shade = Luma([255]);
+    for i in 0..(imgs.len()-1) {
+        let mut drawing = imgs[i][0].clone();
+        let end = (center.0 + flow_guesses[i][0] as i32, center.1 + flow_guesses[i][1] as i32);
+        draw_arrow(&mut drawing, center, end, thick1, thick2, shade);
+        drawings.push(drawing);
+    }
 
-    // let start_ms = SystemTime::now()
-    //     .duration_since(UNIX_EPOCH)
-    //     .expect("wtf")
-    //     .as_millis();
-
-    // let (Ix, Iy, It) = get_gradients(&img0, &img1);
-    // let (flow_field, avg, std) = calculate_flow_field(&Ix, &Iy, &It, n, false);
-    
-
-    // let end_ms = SystemTime::now()
-    //     .duration_since(UNIX_EPOCH)
-    //     .expect("wtf2")
-    //     .as_millis();
-    // let time_elapsed = (end_ms - start_ms) as f64 / 1000.;
-    // println!("flow calculation done; ending time benchmark, starting visualization");
-    
-    // if draw_freq != 0 {
-    //     let drawing;
-    //     let path;
-    //     if draw_freq < 0 {
-    //         drawing = img0.clone();
-    //         path = format!("flow_fields/compressed{}x{}.png", compress_num, img_num);
-    //     }
-    //     else {
-    //         drawing = visualize_flow_field(&img0, &flow_field, n as usize, draw_freq as usize, flow_scale);
-    //         path = format!("flow_fields/labeled{}x{}.png", compress_num, img_num);
-    //     }
-    //     drawing.save(&path).expect("Failed to save drawing");
-    //     println!("drawing saved at {path}");
-    // }
-
-    // let date = Utc::now().format("%Y-%m-%d %H:%M").to_string();
-
-    // let mut file = OpenOptions::new()
-    //     .write(true)
-    //     .append(true)
-    //     .open("flow_fields/logs.txt")
-    //     .expect("Failed to open log file");
-    // writeln!(file, "{} | img {} | time(sec) {:.4} | compress {}x | vx_avg {:.4} | vy_avg {:.4} | vx_std {:.4} | vy_std {:.4}",
-    //         date, img_num, time_elapsed, compress_num, avg[0], avg[1], std[0], std[1])
-    //         .expect("Failed to write to log file");
-
-    // println!("done with img {img_num}");
-    // // check flow field vectors for potential errors and remove outliers           
-    // // then idk
+    let fps = 60;
+    let save_path = format!("videos/pyramid{}x-{}x_{}-{}.mp4", compress_coarse, compress_fine, start_img, end_img);
+    make_video(drawings, w, h, fps, &save_path);
 }
 

@@ -10,6 +10,26 @@ use imageproc::drawing;
 use imageproc::pixelops::interpolate;
 use flow::Flow;
 use std::cmp;
+use std::io::Write;
+use std::process::{Command, Stdio};
+
+pub const WINDOW_SIZE: u32 = 15;
+pub const MIN_LAMBDA_4X: f64 = 20.;
+pub const MAX_LAMBDA_RATIO_4X: f64 = 3.;
+pub const MIN_LAMBDA_5X: f64 = 11.;
+pub const MAX_LAMBDA_RATIO_5X: f64 = 4.;
+pub const MIN_LAMBDA_6X: f64 = 7.;
+pub const MAX_LAMBDA_RATIO_6X: f64 = 3.;
+
+pub fn get_lambda_thresholds(compression: u32) -> (f64, f64) {
+    match compression {
+        4 => { (MIN_LAMBDA_4X, MAX_LAMBDA_RATIO_4X) },
+        5 => { (MIN_LAMBDA_5X, MAX_LAMBDA_RATIO_5X) },
+        6 => { (MIN_LAMBDA_6X, MAX_LAMBDA_RATIO_6X) },
+        _ => { (5., 100.) }
+    }
+}
+
 
 pub fn get_img(file_path: &str) -> DynamicImage {
     let img = open(file_path).expect("Failed to open image");
@@ -55,12 +75,18 @@ pub fn get_gradients(gray_img: &GrayImage, next_gray_img: &GrayImage) -> (ImageB
     // println!("Ix, Iy, and It computed");
     (Ix, Iy, It)
 }
+
+// NOTE: x_pixel_end and y_pixel_end are NON INCLUSIVE
 pub fn calculate_flow_field(Ix: &ImageBuffer<Luma<i16>, Vec<i16>>, 
     Iy: &ImageBuffer<Luma<i16>, Vec<i16>>, 
     It: &ImageBuffer<Luma<i16>, Vec<i16>>, 
     n: u32,
-    testing: bool) -> (Vec<Vec<Flow>>, Vec<f64>, Vec<f64>) {
-    let (w, h) = Ix.dimensions();
+    min_lambda: f64, max_eigen_ratio: f64,
+    x_pixel_start: u32, y_pixel_start: u32, x_pixel_end: u32, y_pixel_end: u32
+    ) -> (Vec<Vec<Flow>>, Vec<f64>, Vec<f64>) {
+    // let (w, h) = Ix.dimensions();
+    let w = x_pixel_end - x_pixel_start;
+    let h = y_pixel_end - y_pixel_start;
 
     let mut flow_field = vec![vec![Flow::new(false, vec![0., 0.], 0., 0., vec![0., 0.], vec![0., 0.]); (w/n) as usize]; (h/n) as usize];
     let mut i = 0;
@@ -68,11 +94,12 @@ pub fn calculate_flow_field(Ix: &ImageBuffer<Luma<i16>, Vec<i16>>,
     let mut std: Vec<f64> = vec![0., 0.];
     let mut num_good_flow: f64 = 0.;
     // looping over each window
-    let total_rows = h/n;
-    while i < total_rows {
+    while i < h/n {
         let mut j = 0;
         while j < w/n {
-            let f = calc_flow_vec(&Ix, &Iy, &It, n, i, j, testing);
+            let f = calc_flow_vec(&Ix, &Iy, &It, n, 
+                x_pixel_start + j * n, y_pixel_start + i * n, 
+                min_lambda, max_eigen_ratio);
             if f.valid() {
                 avg[0] += f.vec()[0];
                 avg[1] += f.vec()[1];
@@ -83,8 +110,10 @@ pub fn calculate_flow_field(Ix: &ImageBuffer<Luma<i16>, Vec<i16>>,
         }
         i += 1;
     }
-    avg[0] /= num_good_flow;
-    avg[1] /= num_good_flow;
+    if num_good_flow != 0. {
+        avg[0] /= num_good_flow;
+        avg[1] /= num_good_flow;
+    }
 
     for row in flow_field.iter() {
         for flow in row.iter() {
@@ -94,9 +123,10 @@ pub fn calculate_flow_field(Ix: &ImageBuffer<Luma<i16>, Vec<i16>>,
             }
         }
     }
-    std[0] = (std[0] / num_good_flow).sqrt();
-    std[1] = (std[1] / num_good_flow).sqrt();
-
+    if num_good_flow != 0. {
+        std[0] = (std[0] / num_good_flow).sqrt();
+        std[1] = (std[1] / num_good_flow).sqrt();
+    }
     // println!("flow field calculated");
     (flow_field, avg, std)
 }
@@ -104,8 +134,9 @@ pub fn calculate_flow_field(Ix: &ImageBuffer<Luma<i16>, Vec<i16>>,
 pub fn calc_flow_vec(Ix: &ImageBuffer<Luma<i16>, Vec<i16>>, 
         Iy: &ImageBuffer<Luma<i16>, Vec<i16>>,
         It: &ImageBuffer<Luma<i16>, Vec<i16>>,
-        n: u32, i: u32, j: u32,
-        testing: bool) -> Flow {
+        n: u32, 
+        x_pixel_start: u32, y_pixel_start: u32,
+        min_lambda: f64, max_lambda_ratio: f64) -> Flow {
     let mut ATA: SMatrix<f64, 2, 2> = SMatrix::zeros();
     let mut ATb: SMatrix<f64, 2, 1> = SMatrix::zeros();
 
@@ -114,8 +145,8 @@ pub fn calc_flow_vec(Ix: &ImageBuffer<Luma<i16>, Vec<i16>>,
     while y < n {
         let mut x = 0;
         while x < n {
-            let px = j * n + x;
-            let py = i * n + y;
+            let px = x_pixel_start + x;
+            let py = y_pixel_start + y;
 
             let ix = Ix.get_pixel(px, py)[0] as f64 / 8.;
             let iy = Iy.get_pixel(px, py)[0] as f64 / 8.;
@@ -135,10 +166,6 @@ pub fn calc_flow_vec(Ix: &ImageBuffer<Luma<i16>, Vec<i16>>,
 
     // the off diagonal entries are equal so b = c
     let det = ATA[(0, 0)] * ATA[(1, 1)] - ATA[(0, 1)].powf(2.); 
-
-    // prob need to tune these values
-    let min_lambda: f64 = 11.; // compress 4: 22.2
-    let max_lambda_ratio: f64 = 4.; // compress 4: 3
     
     // ATA is well conditioned if lambda1 is not that much greater than lambda2
     // (aka the discriminant is not too big)
@@ -159,7 +186,7 @@ pub fn calc_flow_vec(Ix: &ImageBuffer<Luma<i16>, Vec<i16>>,
     };
     let eigen_vec_max: Vec<f64> = vec![-eigen_vec_min[1], eigen_vec_min[0]];
 
-    if testing || (scaled_eigen_min > min_lambda && eigen_ratio < max_lambda_ratio) {
+    if scaled_eigen_min > min_lambda && eigen_ratio < max_lambda_ratio {
         let inv: SMatrix<f64, 2, 2> = matrix![
             ATA[(1, 1)] / det, -ATA[(1, 0)] / det;
             -ATA[(0, 1)] / det, ATA[(0, 0)] / det
@@ -219,4 +246,30 @@ pub fn draw_arrow(img: &mut GrayImage, start: (i32, i32), end: (i32, i32), thick
     let points = [Point::new(start.0 + xoff_start, start.1 + yoff_start), Point::new(end.0 + xoff_end, end.1 + yoff_end), 
                                    Point::new(end.0 - xoff_end, end.1 - yoff_end), Point::new(start.0 - xoff_start, start.1 - yoff_start)];
     drawing::draw_antialiased_polygon_mut(img, &points, shade, interpolate);
+}
+
+pub fn make_video(imgs: Vec<GrayImage>, w: u32, h: u32, fps: u32, save_path: &str) {
+    let mut ffmpeg = Command::new("ffmpeg")
+        .args([
+            "-y",
+            "-f", "rawvideo", "-pix_fmt", "gray",
+            "-s", &format!("{w}x{h}"),
+            "-r", &fps.to_string(),
+            "-i", "-",
+            "-vf", "pad=ceil(iw/2)*2:ceil(ih/2)*2",
+            "-c:v", "libx264", "-pix_fmt", "yuv420p",
+            &save_path
+        ])
+        .stdin(Stdio::piped())
+        .spawn()
+        .expect("Failed to start ffmpeg");
+    let stdin = ffmpeg.stdin.as_mut().expect("Failed to open ffmpeg stdin");
+    for img in &imgs {
+        stdin.write_all(img.as_raw()).expect("Failed to write frame to ffmpeg");
+    }
+    drop(ffmpeg.stdin.take());
+    let status = ffmpeg.wait().expect("ffmpeg didn't run");
+    if status.success() {
+        println!("Video saved to {save_path}");
+    }
 }

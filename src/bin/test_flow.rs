@@ -1,4 +1,4 @@
-use vo_system::{get_img, get_compressed_img, get_gradients, calc_flow_vec, draw_arrow};
+use vo_system::{get_lambda_thresholds, get_img, get_compressed_img, get_gradients, calc_flow_vec, draw_arrow};
 use imageproc::drawing::{draw_hollow_rect_mut};
 use imageproc::rect::Rect;
 use image::Luma;
@@ -52,9 +52,11 @@ fn main() {
     writeln!(file, "")
             .expect("Failed to write to log file");
 
+    let (min_lambda, max_lambda_ratio) = get_lambda_thresholds(compress_num);
+
     for y in start_y..end_y {
         for x in start_x..end_x {
-            let f = calc_flow_vec(&Ix, &Iy, &It, n, y, x, testing);
+            let f = calc_flow_vec(&Ix, &Iy, &It, n, x*n, y*n, min_lambda, max_lambda_ratio);
             
             if (y * w/n + x) % 2 == 0 {
                 let rect = Rect::at((x*n) as i32, (y*n) as i32).of_size(n, n);

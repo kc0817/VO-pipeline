@@ -1,8 +1,7 @@
 use std::env;
 use image::{GrayImage, Luma};
-use vo_system::{get_img, get_grayscale, get_compressed_img, get_gradients, calculate_flow_field, draw_arrow};
-use std::io::Write;
-use std::process::{Command, Stdio};
+use vo_system::{get_lambda_thresholds, get_img, get_grayscale, get_compressed_img, get_gradients, calculate_flow_field, draw_arrow, make_video};
+
 fn main() {
     // arg list: start_img, end_img, compress, window_size
     let args: Vec<String> = env::args().collect();
@@ -34,9 +33,10 @@ fn main() {
 
     // calculating and visualizing flow for each image
     let mut visualized_imgs: Vec<GrayImage> = Vec::new();
+    let (min_lambda, max_lambda_ratio) = get_lambda_thresholds(compress_num);
     for i in 0..(compressed_imgs.len()-1) {
         let (hori_grad, vert_grad, intensity_diff) = get_gradients(&compressed_imgs[i as usize], &compressed_imgs[(i+1) as usize]);
-        let (_, avg_flow, _) = calculate_flow_field(&hori_grad, &vert_grad, &intensity_diff, window_size, false);
+        let (_, avg_flow, _) = calculate_flow_field(&hori_grad, &vert_grad, &intensity_diff, window_size, min_lambda, max_lambda_ratio, 0, 0, w, h);
         let mut drawing = compressed_imgs[i as usize].clone();
         let end = (center.0 + (avg_flow[0] * arrow_scale) as i32, center.1 + (avg_flow[1] * arrow_scale) as i32);
         draw_arrow(&mut drawing, center, end, thick1, thick2, arrow_shade);
@@ -48,27 +48,5 @@ fn main() {
     // saving visualizations as video
     let fps = 60;
     let save_path = format!("videos/frame{}-{}compress{}xfps{}.mp4", start_img, end_img, compress_num, fps);
-    let mut ffmpeg = Command::new("ffmpeg")
-        .args([
-            "-y",
-            "-f", "rawvideo", "-pix_fmt", "gray",
-            "-s", &format!("{w}x{h}"),
-            "-r", &fps.to_string(),
-            "-i", "-",
-            "-vf", "pad=ceil(iw/2)*2:ceil(ih/2)*2",
-            "-c:v", "libx264", "-pix_fmt", "yuv420p",
-            &save_path
-        ])
-        .stdin(Stdio::piped())
-        .spawn()
-        .expect("Failed to start ffmpeg");
-    let stdin = ffmpeg.stdin.as_mut().expect("Failed to open ffmpeg stdin");
-    for img in &visualized_imgs {
-        stdin.write_all(img.as_raw()).expect("Failed to write frame to ffmpeg");
-    }
-    drop(ffmpeg.stdin.take());
-    let status = ffmpeg.wait().expect("ffmpeg didn't run");
-    if status.success() {
-        println!("Video saved to {save_path}");
-    }
+    make_video(visualized_imgs, w, h, fps, &save_path);
 }

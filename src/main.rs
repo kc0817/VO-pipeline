@@ -13,12 +13,17 @@ fn main() {
     let end_img: u32 = args[2].trim().parse().unwrap();
     let compress_fine: u32 = args[3].trim().parse().unwrap();
     let compress_coarse: u32 = args[4].trim().parse().unwrap();
+    let cur_compression: u32 = args[5].trim().parse().unwrap(); // if images are already stored in compressed format
+
+    if compress_fine < cur_compression {
+        println!("compress fine of {compress_fine} is not >= cur compression of {cur_compression}");
+    }
     let num_levels = (compress_coarse - compress_fine) as usize + 1;
     let mut imgs: Vec<Vec<GrayImage>> = Vec::new();
 
     for i in start_img..end_img {
         let path = format!("data/frame{i}.png");
-        let fine = get_compressed_img(get_img(&path).to_luma8(), compress_fine);
+        let fine = get_compressed_img(get_img(&path).to_luma8(), compress_fine-cur_compression);
         imgs.push(vec![fine; num_levels]);
         for j in 1..num_levels {
             imgs[(i-start_img) as usize][j as usize] = get_compressed_img(imgs[(i-start_img) as usize][(j-1) as usize].clone(), 1);
@@ -41,10 +46,20 @@ fn main() {
                 dx, 
                 dy);
             
+            // pseudocode for iterative implementation
+            // let cur_guess = 0, 0
+            // while true {
+            //  flow field calculations go here
+            //  ...
+            //  flow_guess update goes here
+            //  if avg < threshold
+            //   break;
+            //  else shift image by avg
+            // }
             let (Ix, Iy, It) = get_gradients(&imgs[i][index], &shifted_img);
             let (min_lambda, max_lambda_ratio) = get_lambda_thresholds(compress_fine + index as u32);
             let (w, h) = imgs[i][index].dimensions();
-            let (_, avg, _) = calculate_flow_field(&Ix, &Iy, &It, window_size, 
+            let (field, avg, _) = calculate_flow_field(&Ix, &Iy, &It, window_size, 
                 min_lambda, max_lambda_ratio,
                 cmp::max(0, dx) as u32, cmp::max(0, dy) as u32,
                 (cmp::min(dx, 0) + w as i32) as u32, (cmp::min(dy, 0) + h as i32) as u32);
@@ -65,17 +80,22 @@ fn main() {
     let mut drawings: Vec<GrayImage> = Vec::new();
     let (w, h) = imgs[0][0].dimensions();
     let center = (w as i32/2, h as i32/2);
+    // let tl = (center.0/2, center.1/2);
+    // let tr = (center.0 * 3/2, center.1/2);
+    // let bl = (center.0/2, center.1 * 3/2);
+    // let br = (center.0 * 3/2, center.1 * 3/2);
     let thick1 = 8;
     let thick2 = 2;
-    let shade = Luma([255]);
+    let white: Luma<u8> = Luma([255]);
+    let grey: Luma<u8> = Luma([200]);
     for i in 0..(imgs.len()-1) {
         let mut drawing = imgs[i][0].clone();
         let end = (center.0 + flow_guesses[i][0] as i32, center.1 + flow_guesses[i][1] as i32);
-        draw_arrow(&mut drawing, center, end, thick1, thick2, shade);
+        draw_arrow(&mut drawing, center, end, thick1, thick2, white);
         drawings.push(drawing);
     }
 
-    let fps = 60;
+    let fps = 30;
     let save_path = format!("videos/pyramid{}x-{}x_{}-{}.mp4", compress_coarse, compress_fine, start_img, end_img);
     make_video(drawings, w, h, fps, &save_path);
 }

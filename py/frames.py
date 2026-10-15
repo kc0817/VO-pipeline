@@ -6,8 +6,7 @@ show_imgs = False
 if len(sys.argv) == 2:
     show_imgs = True
 
-path = "/mnt/c/Users/CHENY1/Downloads/nemo-data-straight-down-acre-trimmed-1.mp4"
-fps = 30
+path = "/mnt/c/Users/CHENY1/Downloads/dodo-flight-test-03-18-2026.mp4"
 cap = cv2.VideoCapture(path)
 if not cap.isOpened():
     print("failed to open video capture; exiting")
@@ -21,7 +20,7 @@ while True:
         break
     if show_imgs:
         cv2.imshow("images", frame)
-        if cv2.waitKey(1000 // fps) != -1:
+        if cv2.waitKey(1000 // 30) != -1:
             print("user input detected; stopping")
             break
     write_success = cv2.imwrite("../data/frame" + str(n) + ".png", frame)
@@ -31,6 +30,9 @@ while True:
     if n % 50 == 0:
         print("saved frame" + str(n) + ".png")
     n += 1
+    if n == 1301:
+        break
 
+print("fps: " + str(cap.get(cv2.CAP_PROP_FPS)))
 cap.release()
 cv2.destroyAllWindows()

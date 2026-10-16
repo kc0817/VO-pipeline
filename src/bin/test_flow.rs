@@ -12,6 +12,7 @@ fn main() {
     let img_num: i32 = args[1].parse().unwrap();
     let compress_num: u32 = args[2].parse().unwrap();
     let cur_compress: u32 = args[3].parse().unwrap(); // if the image is already compressed to some level
+    let testing: u32 = args[4].parse().unwrap();
     let n = 15;
 
     let path = format!("data/frame{}.png", img_num);
@@ -22,21 +23,20 @@ fn main() {
     let (w, h) = img0.dimensions();
     println!("img dimensions: {w}, {h}");
 
-    let select_one_window = args.len() > 4;
     let mut start_x= 0;
     let mut start_y = 0;
     let mut end_x = w / n;
     let mut end_y = h / n;
-    if select_one_window {
-        start_x = args[3].parse().unwrap();
-        start_y = args[4].parse().unwrap();
-        end_x = start_x + 1;
-        end_y = start_y + 1;
-    }
+    // let select_one_window = args.len() > 4;
+    // if select_one_window {
+    //     start_x = args[3].parse().unwrap();
+    //     start_y = args[4].parse().unwrap();
+    //     end_x = start_x + 1;
+    //     end_y = start_y + 1;
+    // }
     let flow_scale = 20.;
     let thick1: u32 = 8;
     let thick2: u32 = 2;
-    let black = Luma([0]);
     let white = Luma([255]);
 
     let (Ix, Iy, It) = get_gradients(&img0, &img1);
@@ -52,7 +52,8 @@ fn main() {
     writeln!(file, "")
             .expect("Failed to write to log file");
 
-    let (min_lambda, max_lambda_ratio) = get_lambda_thresholds(compress_num);
+    let thresholds = get_lambda_thresholds(compress_num);
+    let (min_lambda, max_lambda_ratio) = if testing == 1 { (0., 500.) } else { (thresholds.0, thresholds.1) };
 
     // for y in start_y..end_y {
     //     for x in start_x..end_x {
@@ -85,6 +86,8 @@ fn main() {
                     img_num, compress_num)
                     .expect("Failed to write to log file");
     let (field, avg, std) = calculate_flow_field(&Ix, &Iy, &It, n, min_lambda, max_lambda_ratio, start_x*n, start_y*n, end_x*n, end_y*n);
+    let white = Luma([255]);
+    let black = Luma([0]);
     for i in 0..field.len() {
         for j in 0..field[i].len() {
             let f = &field[i][j];
@@ -96,7 +99,8 @@ fn main() {
             let start = ((j as u32 * n + n/2) as i32, (i as u32 * n + n/2) as i32);
             if f.valid() {
                 let end = ((start.0 as f64 + f.vec()[0] * flow_scale) as i32, (start.1 as f64 + f.vec()[1] * flow_scale) as i32);
-                draw_arrow(&mut drawing, start, end, thick1, thick2, Luma([255]));
+                let testing_valid = testing == 0 || f.eigen_min() > thresholds.0 && f.eigen_ratio() < thresholds.1;
+                draw_arrow(&mut drawing, start, end, thick1, thick2, if testing_valid { white } else { black });
             }
 
             writeln!(file, "    im{}_{}x | x{} y{} | vx {:.3} vy {:.3} | eigen min {:.3} eigen ratio {:.3}",

@@ -13,6 +13,8 @@ use std::io::Write;
 use std::process::{Command, Stdio};
 
 pub const WINDOW_SIZE: u32 = 15;
+pub const MAX_ITERATIONS: u32 = 4;
+
 pub const MIN_LAMBDA_4X: f64 = 20.;
 pub const MAX_LAMBDA_RATIO_4X: f64 = 3.;
 pub const MIN_LAMBDA_5X: f64 = 11.;

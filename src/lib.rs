@@ -3,7 +3,6 @@ pub mod flow;
 use image::{DynamicImage, GrayImage, ImageBuffer, open};
 use imageproc::gradients::{horizontal_sobel, vertical_sobel};
 use image::Luma;
-use imageproc::map::map_pixels2;
 use imageproc::point::Point;
 use nalgebra::{matrix, SMatrix};
 use imageproc::drawing;
@@ -14,19 +13,24 @@ use std::io::Write;
 use std::process::{Command, Stdio};
 
 pub const WINDOW_SIZE: u32 = 15;
-pub const MIN_LAMBDA_4X: f64 = 20.;
-pub const MAX_LAMBDA_RATIO_4X: f64 = 3.;
-pub const MIN_LAMBDA_5X: f64 = 11.;
-pub const MAX_LAMBDA_RATIO_5X: f64 = 4.;
-pub const MIN_LAMBDA_6X: f64 = 7.;
-pub const MAX_LAMBDA_RATIO_6X: f64 = 3.;
+pub const MAX_ITERATIONS: u32 = 1;
 
-pub fn get_lambda_thresholds(compression: u32) -> (f64, f64) {
+const MIN_LAMBDA_4X: f64 = 20.;
+const MAX_LAMBDA_RATIO_4X: f64 = 3.;
+const MAX_RESIDUAL_4X: f64 = 10000000.;
+const MIN_LAMBDA_5X: f64 = 11.;
+const MAX_LAMBDA_RATIO_5X: f64 = 4.;
+const MAX_RESIDUAL_5X: f64 = 10000000.;
+const MIN_LAMBDA_6X: f64 = 11.;
+const MAX_LAMBDA_RATIO_6X: f64 = 3.;
+const MAX_RESIDUAL_6X: f64 = 10000000.;
+
+pub fn get_lambda_thresholds(compression: u32) -> (f64, f64, f64) {
     match compression {
-        4 => { (MIN_LAMBDA_4X, MAX_LAMBDA_RATIO_4X) },
-        5 => { (MIN_LAMBDA_5X, MAX_LAMBDA_RATIO_5X) },
-        6 => { (MIN_LAMBDA_6X, MAX_LAMBDA_RATIO_6X) },
-        _ => { (5., 100.) }
+        4 => { (MIN_LAMBDA_4X, MAX_LAMBDA_RATIO_4X, MAX_RESIDUAL_4X) },
+        5 => { (MIN_LAMBDA_5X, MAX_LAMBDA_RATIO_5X, MAX_RESIDUAL_5X) },
+        6 => { (MIN_LAMBDA_6X, MAX_LAMBDA_RATIO_6X, MAX_RESIDUAL_6X) },
+        _ => { (5., 100., 100000000.) }
     }
 }
 
@@ -71,7 +75,10 @@ pub fn get_gradients(gray_img: &GrayImage, next_gray_img: &GrayImage) -> (ImageB
     // println!("grayscale images computed");
     let Ix = horizontal_sobel(&gray_img);
     let Iy = vertical_sobel(&gray_img);
-    let It = map_pixels2(&gray_img, &next_gray_img, |p, q| Luma([q[0] as i16 - p[0] as i16]));    
+    let (w, h) = gray_img.dimensions();
+    let It = ImageBuffer::from_fn(w, h, |x, y| {
+        Luma([next_gray_img.get_pixel(x, y)[0] as i16 - gray_img.get_pixel(x, y)[0] as i16])
+    });
     // println!("Ix, Iy, and It computed");
     (Ix, Iy, It)
 }
@@ -81,14 +88,14 @@ pub fn calculate_flow_field(Ix: &ImageBuffer<Luma<i16>, Vec<i16>>,
     Iy: &ImageBuffer<Luma<i16>, Vec<i16>>, 
     It: &ImageBuffer<Luma<i16>, Vec<i16>>, 
     n: u32,
-    min_lambda: f64, max_eigen_ratio: f64,
+    min_lambda: f64, max_eigen_ratio: f64, max_residual: f64,
     x_pixel_start: u32, y_pixel_start: u32, x_pixel_end: u32, y_pixel_end: u32
     ) -> (Vec<Vec<Flow>>, Vec<f64>, Vec<f64>) {
     // let (w, h) = Ix.dimensions();
     let w = x_pixel_end - x_pixel_start;
     let h = y_pixel_end - y_pixel_start;
 
-    let mut flow_field = vec![vec![Flow::new(false, vec![0., 0.], 0., 0., vec![0., 0.], vec![0., 0.]); (w/n) as usize]; (h/n) as usize];
+    let mut flow_field = vec![vec![Flow::new(false, vec![0., 0.], 0., 0., vec![0., 0.], vec![0., 0.], 0.); (w/n) as usize]; (h/n) as usize];
     let mut i = 0;
     let mut avg: Vec<f64> = vec![0., 0.];
     let mut std: Vec<f64> = vec![0., 0.];
@@ -99,7 +106,7 @@ pub fn calculate_flow_field(Ix: &ImageBuffer<Luma<i16>, Vec<i16>>,
         while j < w/n {
             let f = calc_flow_vec(&Ix, &Iy, &It, n, 
                 x_pixel_start + j * n, y_pixel_start + i * n, 
-                min_lambda, max_eigen_ratio);
+                min_lambda, max_eigen_ratio, max_residual);
             if f.valid() {
                 avg[0] += f.vec()[0];
                 avg[1] += f.vec()[1];
@@ -136,9 +143,10 @@ pub fn calc_flow_vec(Ix: &ImageBuffer<Luma<i16>, Vec<i16>>,
         It: &ImageBuffer<Luma<i16>, Vec<i16>>,
         n: u32, 
         x_pixel_start: u32, y_pixel_start: u32,
-        min_lambda: f64, max_lambda_ratio: f64) -> Flow {
+        min_lambda: f64, max_lambda_ratio: f64, max_residual: f64) -> Flow {
     let mut ATA: SMatrix<f64, 2, 2> = SMatrix::zeros();
     let mut ATb: SMatrix<f64, 2, 1> = SMatrix::zeros();
+    let mut btb: f64 = 0.;
 
     // filling out A and b matrices
     let mut y = 0;
@@ -158,6 +166,8 @@ pub fn calc_flow_vec(Ix: &ImageBuffer<Luma<i16>, Vec<i16>>,
             let b = -It.get_pixel(px, py)[0] as f64;
             ATb[(0, 0)] += b * ix;
             ATb[(1, 0)] += b * iy;
+
+            btb += b * b;
 
             x += 1;
         }
@@ -186,16 +196,17 @@ pub fn calc_flow_vec(Ix: &ImageBuffer<Luma<i16>, Vec<i16>>,
     };
     let eigen_vec_max: Vec<f64> = vec![-eigen_vec_min[1], eigen_vec_min[0]];
 
-    if scaled_eigen_min > min_lambda && eigen_ratio < max_lambda_ratio {
-        let inv: SMatrix<f64, 2, 2> = matrix![
-            ATA[(1, 1)] / det, -ATA[(1, 0)] / det;
-            -ATA[(0, 1)] / det, ATA[(0, 0)] / det
-        ];
+    let inv: SMatrix<f64, 2, 2> = matrix![
+        ATA[(1, 1)] / det, -ATA[(1, 0)] / det;
+        -ATA[(0, 1)] / det, ATA[(0, 0)] / det
+    ];
+    let x_star: SMatrix<f64, 2, 1> = inv * ATb;
+    let residual = (btb - (x_star.transpose() * ATb)[(0, 0)]) / (n * n) as f64;
 
-        let x_star: SMatrix<f64, 2, 1> = inv * ATb;
-        Flow::new(true, vec![x_star[(0, 0)], x_star[(1, 0)]], scaled_eigen_min, eigen_ratio, eigen_vec_min, eigen_vec_max)
+    if scaled_eigen_min > min_lambda && eigen_ratio < max_lambda_ratio && max_residual > residual{
+        Flow::new(true, vec![x_star[(0, 0)], x_star[(1, 0)]], scaled_eigen_min, eigen_ratio, eigen_vec_min, eigen_vec_max, residual)
     } else {
-        Flow::new(false, vec![0., 0.], scaled_eigen_min, eigen_ratio, eigen_vec_min, eigen_vec_max)
+        Flow::new(false, vec![0., 0.], scaled_eigen_min, eigen_ratio, eigen_vec_min, eigen_vec_max, residual)
     }
 }
 

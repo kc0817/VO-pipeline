@@ -5,18 +5,20 @@ pub struct Flow {
     eigen_min: f64,
     eigen_ratio: f64,
     eigen_vec_min: Vec<f64>,
-    eigen_vec_max: Vec<f64>
+    eigen_vec_max: Vec<f64>,
+    residual: f64
 }
 
 impl Flow {
-    pub fn new(valid: bool, vec: Vec<f64>, eigen_min: f64, eigen_ratio: f64, eigen_vec_min: Vec<f64>, eigen_vec_max: Vec<f64>) -> Self {
+    pub fn new(valid: bool, vec: Vec<f64>, eigen_min: f64, eigen_ratio: f64, eigen_vec_min: Vec<f64>, eigen_vec_max: Vec<f64>, residual: f64) -> Self {
         Flow {
             valid,
             vec,
             eigen_min,
             eigen_ratio,
             eigen_vec_min,
-            eigen_vec_max
+            eigen_vec_max,
+            residual
         }
     }
     pub fn valid(&self) -> bool {
@@ -36,5 +38,8 @@ impl Flow {
     }
     pub fn eigen_vec_max(&self) -> Vec<f64> {
         self.eigen_vec_max.clone()
+    }
+    pub fn residual(&self) -> f64 {
+        self.residual
     }
 }

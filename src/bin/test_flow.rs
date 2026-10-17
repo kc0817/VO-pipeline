@@ -50,12 +50,12 @@ fn main() {
             .expect("Failed to write to log file");
 
     let thresholds = get_lambda_thresholds(compress_num);
-    let (min_lambda, max_lambda_ratio) = if testing == 1 { (0., 500.) } else { (thresholds.0, thresholds.1) };
+    let (min_lambda, max_lambda_ratio, max_residual) = if testing == 1 { get_lambda_thresholds(0) } else { (thresholds.0, thresholds.1, thresholds.2) };
 
     writeln!(file, "im{}_{}x-----",
                     img_num, compress_num)
                     .expect("Failed to write to log file");
-    let (field, avg, std) = calculate_flow_field(&Ix, &Iy, &It, n, min_lambda, max_lambda_ratio, start_x, start_y, end_x, end_y);
+    let (field, avg, std) = calculate_flow_field(&Ix, &Iy, &It, n, min_lambda, max_lambda_ratio, max_residual, start_x, start_y, end_x, end_y);
     let white = Luma([255]);
     let black = Luma([0]);
     for i in 0..field.len() {
@@ -73,8 +73,8 @@ fn main() {
                 draw_arrow(&mut drawing, start, end, thick1, thick2, if testing_valid { white } else { black });
             }
 
-            writeln!(file, "    im{}_{}x | x{} y{} | vx {:.3} vy {:.3} | eigen min {:.3} eigen ratio {:.3}",
-                    img_num, compress_num, j, i, f.vec()[0], f.vec()[1], f.eigen_min(), f.eigen_ratio())
+            writeln!(file, "    im{}_{}x | x{} y{} | vx {:.3} vy {:.3} | eigen min {:.3} eigen ratio {:.3} | residual {:.3}",
+                    img_num, compress_num, j, i, f.vec()[0], f.vec()[1], f.eigen_min(), f.eigen_ratio(), f.residual())
                     .expect("Failed to write to log file");
         }
     }

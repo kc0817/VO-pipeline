@@ -44,8 +44,9 @@ fn main() {
         // iterating over each compression from coarse to fine
         for j in 0..num_levels {
             let index = num_levels -1 -j;
-            flow_guess[0] = flow_guess[0].round();
-            flow_guess[1] = flow_guess[1].round();
+
+            flow_guess[0] = (flow_guess[0] * 2.).round();
+            flow_guess[1] = (flow_guess[1] * 2.).round();
             let mut dx = -flow_guess[0] as i32;
             let mut dy = -flow_guess[1] as i32;
             let mut shifted_img = get_shifted_img(
@@ -53,19 +54,20 @@ fn main() {
                 dx, 
                 dy);
             // println!("on level {j} flow guess = {:.2}, {:.2}", flow_guess[0], flow_guess[1]);
-            let (min_lambda, max_lambda_ratio) = get_lambda_thresholds(compress_fine + index as u32);
+            let (min_lambda, max_lambda_ratio, max_residual) = get_lambda_thresholds(compress_fine + index as u32);
             let (w, h) = img0s[index].dimensions();
             
             for k in 0..MAX_ITERATIONS {
                 let (Ix, Iy, It) = get_gradients(&img0s[index], &shifted_img);
                 let (_, avg, _) = calculate_flow_field(&Ix, &Iy, &It, window_size, 
-                    min_lambda, max_lambda_ratio,
+                    min_lambda, max_lambda_ratio, max_residual,
                     cmp::max(0, dx) as u32, cmp::max(0, dy) as u32,
                     (cmp::min(dx, 0) + w as i32) as u32, (cmp::min(dy, 0) + h as i32) as u32);
                 
                 let rx = avg[0].round();
                 let ry = avg[1].round();
                 let delta = 0.0001;
+
                 if (rx.abs() < delta && ry.abs() < delta) || k == MAX_ITERATIONS-1 {
                     flow_guess[0] += avg[0];
                     flow_guess[1] += avg[1];
@@ -81,12 +83,8 @@ fn main() {
                     // println!("  adding {:.2}, {:.2} to flow guess", rx, ry);
                 }
             }
-            flow_guess[0] *= 2.;
-            flow_guess[1] *= 2.;
             
         }
-        flow_guess[0] /= 2.;
-        flow_guess[1] /= 2.;
         // println!("flow guess: {:.2}, {:.2}", flow_guess[0], flow_guess[1]);
         // keeping this commented so video arrows are to scale
         // let remaining_scale = 2_f64.powf(compress_fine as f64);
